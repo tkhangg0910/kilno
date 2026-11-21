@@ -85,14 +85,6 @@ pub fn open_file_or_select(path: &std::path::Path) {
     }
 }
 
-/// A local path Ctrl+clicked in a terminal: a folder opens in Explorer, a file is shown
-/// selected in its folder. Nothing is run: Explorer only browses.
-pub fn reveal(path: &std::path::Path) {
-    use std::os::windows::process::CommandExt;
-    let arg = if path.is_dir() { format!("\"{}\"", path.display()) } else { format!("/select,\"{}\"", path.display()) };
-    let _ = std::process::Command::new("explorer.exe").raw_arg(arg).spawn();
-}
-
 /// Our own top-level window with this title, if there is one.
 pub fn find_own_window(title: &str) -> Option<isize> {
     // SAFETY: valid wide string; no class filter.

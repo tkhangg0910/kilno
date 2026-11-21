@@ -70,7 +70,7 @@ pub struct ViewOutput {
     pub resized: Option<GridSize>,
     /// An OSC 8 hyperlink was clicked; the pane confirms before opening it.
     pub link: Option<String>,
-    /// A local path was Ctrl+clicked: shown in File Explorer.
+    /// A local path was Ctrl+clicked: the app shows it in its Files panel.
     pub open_path: Option<std::path::PathBuf>,
     /// The widget gained (true) or lost (false) keyboard focus this frame.
     pub focus_changed: Option<bool>,
@@ -268,7 +268,7 @@ fn handle_pointer(
                     PointerButton::Secondary => MouseButton::Right,
                     _ => continue,
                 };
-                // Ctrl+click on a local path shows it in Explorer, even while the app reports the mouse.
+                // Ctrl+click on a local path shows it in the Files panel, even while the app reports the mouse.
                 if b == MouseButton::Left && modifiers.ctrl && rect.contains(*pos) {
                     if let Some((path, _, _)) = path_at(term, state, pt) {
                         if *pressed {

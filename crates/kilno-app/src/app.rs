@@ -1936,10 +1936,10 @@ impl KilnoApp {
                 ctx.copy_text(text);
             }
             links.extend(out.link);
+            // A Ctrl+clicked path shows in Kilno's own Files panel, beside this terminal.
             if let Some(path) = out.open_path {
-                os::shell::reveal(&path);
-                #[cfg(not(windows))]
-                let _ = path;
+                pane.doc = None;
+                pane.files.get_or_insert_with(|| crate::files_panel::FilesPanel::new(&pane.cwd)).reveal(ui.ctx(), &path);
             }
             paste = out.paste_requested;
         }

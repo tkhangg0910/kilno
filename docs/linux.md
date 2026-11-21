@@ -41,7 +41,6 @@ Ctrl+click path links, the doc viewer, Settings and the setup window, Update, an
 | Ctrl+Alt+S screenshot shortcut | Yes | Not yet |
 | Icons in the chrome | Segoe Fluent / MDL2 | The nearest Unicode symbols (those fonts are Windows-only) |
 | Paste of copied files | From Explorer | From any file manager that copies `file://` URIs |
-| Ctrl+click a file path | Explorer, the file selected | The file manager (FileManager1), the file selected where it supports that |
 | Setup's Install / Sign in | A PowerShell window | Your terminal (x-terminal-emulator, GNOME Terminal, Konsole, Xfce Terminal or xterm) |
 
 Paths that could reach the network are never looked up for a Ctrl+click link: anything under
