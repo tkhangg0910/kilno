@@ -1,5 +1,5 @@
 //! Local paths in terminal text (`C:\work\app.rs`, `src/main.rs:42:7`, `.\docs`): found under
-//! the pointer, so Ctrl+click can show them in File Explorer. Only a path that exists counts;
+//! the pointer, so Ctrl+click can show them in the Files panel. Only a path that exists counts;
 //! the lookup is the caller's (it knows the pane's folder), through [`resolve`].
 
 use std::path::{Path, PathBuf};

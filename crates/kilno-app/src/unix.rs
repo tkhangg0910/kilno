@@ -28,10 +28,9 @@ pub mod shell {
         }
     }
 
-    /// A local path Ctrl+clicked in a terminal: a folder opens in the file manager; a file is shown
-    /// selected in its folder where the file manager supports it (FileManager1 over D-Bus), else
-    /// its folder opens. Nothing is run: only browsed.
-    pub fn reveal(path: &Path) {
+    /// A folder opens in the file manager; a file is shown selected in its folder where the file
+    /// manager supports it (FileManager1 over D-Bus), else its folder opens. Nothing is run.
+    fn reveal(path: &Path) {
         if path.is_dir() {
             open(&path.to_string_lossy());
             return;

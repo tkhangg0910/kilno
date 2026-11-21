@@ -26,6 +26,10 @@ pub struct FilesPanel {
     view: View,
     /// Each file opened gets a fresh scroll id.
     seq: u64,
+    /// A path to show once the editor's unsaved edits are saved or discarded.
+    pending: Option<PathBuf>,
+    /// A folder the tree scrolls to on its next draw.
+    scroll_to: Option<PathBuf>,
 }
 
 enum View {
@@ -130,6 +134,8 @@ impl FilesPanel {
             found: None,
             view: View::Tree,
             seq: 0,
+            pending: None,
+            scroll_to: None,
         };
         p.listings.insert(root.to_path_buf(), files::list(root));
         p
@@ -162,6 +168,45 @@ impl FilesPanel {
         };
     }
 
+    /// A path Ctrl+clicked in the terminal: a file opens here, a folder is opened in the tree
+    /// with the folders above it. A path outside the panel's folder makes its folder the root.
+    /// Unsaved edits ask Save / Discard / Cancel first.
+    pub fn reveal(&mut self, ctx: &egui::Context, path: &Path) {
+        if let View::Text(e) = &mut self.view {
+            if e.dirty() {
+                e.leaving = Some(false);
+                self.pending = Some(path.to_path_buf());
+                return;
+            }
+        }
+        let is_dir = path.is_dir();
+        let rel = relative(&self.root, path);
+        let rel = match rel {
+            Some(rel) => rel,
+            None => {
+                let Some(folder) = (if is_dir { Some(path) } else { path.parent() }) else { return };
+                *self = Self::new(folder);
+                relative(&self.root, path).unwrap_or_default()
+            }
+        };
+        self.filter.clear();
+        // The folders down to it, opened (a file's own folder last; a folder itself too).
+        let parts: Vec<_> = rel.components().collect();
+        let opened = if is_dir { parts.len() } else { parts.len().saturating_sub(1) };
+        let mut dir = self.root.clone();
+        for c in &parts[..opened] {
+            dir.push(c);
+            self.listings.entry(dir.clone()).or_insert_with(|| files::list(&dir));
+            self.open.insert(dir.clone());
+        }
+        if is_dir {
+            self.view = View::Tree;
+            self.scroll_to = Some(dir);
+        } else {
+            self.open_file(ctx, &self.root.join(&rel));
+        }
+    }
+
     fn refresh(&mut self) {
         let dirs: Vec<PathBuf> = self.listings.keys().cloned().collect();
         for d in dirs {
@@ -169,6 +214,14 @@ impl FilesPanel {
         }
         self.found = None;
     }
+}
+
+/// `path` below `root` (the same folder counts, as an empty path), matched as the platform
+/// does (any case on Windows); None outside it.
+fn relative(root: &Path, path: &Path) -> Option<PathBuf> {
+    use kilno_core::paths::{is_inside, normalize};
+    let (root, path) = (normalize(root), normalize(path));
+    is_inside(&root, &path).then(|| path.components().skip(root.components().count()).collect())
 }
 
 fn name_of(p: &Path) -> String {
@@ -244,6 +297,7 @@ pub fn show(ui: &mut Ui, rect: Rect, body: Rect, f: &mut FilesPanel, share: &mut
     let mut content = Rect::from_min_max(Pos2::new(rect.left() + 1.0, bar.bottom()), rect.max);
     // Save or Discard on the "Unsaved changes" strip: Some(true) closes, Some(false) goes back.
     let mut left: Option<bool> = None;
+    let mut cancelled = false;
     match &mut f.view {
         View::Tree => tree(ui, content, f),
         View::Doc { text, id, .. } => out.links = markdown(ui, content, *id, text, cache),
@@ -275,7 +329,10 @@ pub fn show(ui: &mut Ui, rect: Rect, body: Rect, f: &mut FilesPanel, share: &mut
                         e.leaving = None;
                         left = Some(closing);
                     }
-                    Some(_) => e.leaving = None,
+                    Some(_) => {
+                        e.leaving = None;
+                        cancelled = true;
+                    }
                     None => {}
                 }
             } else if e.stale {
@@ -302,8 +359,17 @@ pub fn show(ui: &mut Ui, rect: Rect, body: Rect, f: &mut FilesPanel, share: &mut
     }
     match left {
         Some(true) => out.close = true,
-        Some(false) => f.view = View::Tree,
+        Some(false) => {
+            f.view = View::Tree;
+            // A path Ctrl+clicked while the edits were unsaved: shown now.
+            if let Some(path) = f.pending.take() {
+                f.reveal(ui.ctx(), &path);
+            }
+        }
         None => {}
+    }
+    if cancelled || left == Some(true) {
+        f.pending = None;
     }
     grip(ui, rect, body, share);
     out
@@ -381,9 +447,14 @@ fn tree(ui: &mut Ui, r: Rect, f: &mut FilesPanel) {
             if query.is_empty() {
                 let mut rows = Vec::new();
                 flatten(f, &f.root.clone(), 0, &mut rows);
+                let target = f.scroll_to.take();
                 for (e, depth) in rows {
                     let open = f.open.contains(&e.path);
-                    if row(ui, &e, depth, open, None).clicked() {
+                    let resp = row(ui, &e, depth, open, None);
+                    if target.as_ref() == Some(&e.path) {
+                        resp.scroll_to_me(Some(egui::Align::TOP));
+                    }
+                    if resp.clicked() {
                         clicked = Some(e);
                     }
                 }
@@ -479,5 +550,38 @@ mod tests {
         touch_later(&p, 10);
         e.watch(20.0);
         assert!(e.stale && e.text.ends_with("C=4\n"));
+    }
+
+    #[test]
+    fn reveal_opens_the_folders_down_to_a_path() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path().join("proj");
+        std::fs::create_dir_all(root.join("src/deep")).unwrap();
+        std::fs::write(root.join("src/deep/.env"), "A=1\n").unwrap();
+        std::fs::write(d.path().join("other.txt"), "x").unwrap();
+        let ctx = egui::Context::default();
+        let mut f = FilesPanel::new(&root);
+
+        f.reveal(&ctx, &root.join("src/deep"));
+        assert!(matches!(f.view, View::Tree));
+        assert!(f.open.contains(&root.join("src")) && f.open.contains(&root.join("src/deep")));
+        assert_eq!(f.scroll_to.as_deref(), Some(root.join("src/deep").as_path()));
+
+        f.reveal(&ctx, &root.join("src/deep/.env"));
+        assert!(matches!(&f.view, View::Text(e) if e.path == root.join("src/deep/.env")));
+
+        // Unsaved edits ask first; the path is shown after Discard.
+        if let View::Text(e) = &mut f.view {
+            e.text.push_str("B=2\n");
+        }
+        f.reveal(&ctx, &root.join("src"));
+        assert!(matches!(&f.view, View::Text(e) if e.leaving == Some(false)));
+        assert_eq!(f.pending.as_deref(), Some(root.join("src").as_path()));
+
+        // Outside the folder: its own folder becomes the root.
+        let mut g = FilesPanel::new(&root);
+        g.reveal(&ctx, &d.path().join("other.txt"));
+        assert_eq!(g.root, d.path());
+        assert!(matches!(g.view, View::Text(_)));
     }
 }

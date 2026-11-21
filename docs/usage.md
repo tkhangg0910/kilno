@@ -15,7 +15,7 @@ kilno.exe [folder] [--background]
 
 1. First launch: the setup window finds Claude Code, Codex and OpenCode, can install or sign in, and lets you choose the default. Reopen it with Settings > Agents.
 2. The sidebar lists sessions by project for every agent in use (each row marked with its agent's logo when more than one is used). Start a new session, resume one, or branch from one. Right-click a row to rename it, close its pane, or hide it (Del): a hidden session and its branches move to the folded Hidden section at the bottom, and Unhide (or opening it) brings it back. Hiding keeps the transcript, so `claude --resume` still lists it. Drag a row to put its session (with its branches) somewhere else in its section; the sort switches to Custom and the order is kept.
-3. In a terminal, hold Ctrl over a local path (`C:\work\app.rs`, `src/main.rs:42`) and click it to show it in File Explorer: a folder opens, a file is selected in its folder. Relative paths are looked up in the pane's folder; only paths that exist are links.
+3. In a terminal, hold Ctrl over a local path (`C:\work\app.rs`, `src/main.rs:42`) and click it to show it in the Files panel beside the terminal: a file opens there (markdown, a picture, or text in the editor), a folder opens in the tree. A path outside the session's folder makes its folder the panel's. Relative paths are looked up in the pane's folder; only paths that exist are links.
 4. Each pane header shows model, branch, context and effort; a status light shows working, done or needs you.
 5. The island at the top of the screen announces when a session needs you or is done, offers a picker, and accepts dropped files.
 6. Closing the window only hides it; quit from the gear menu.
