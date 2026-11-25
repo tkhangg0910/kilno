@@ -55,6 +55,13 @@ struct Editor {
     /// Leaving with unsaved edits waits for Save, Discard or Cancel; the bool is "close".
     leaving: Option<bool>,
     error: Option<String>,
+    /// The Ctrl+F bar: what is looked for, and None when it is closed.
+    find: Option<String>,
+    /// Where the next search starts (a char index), and the last one found nothing.
+    find_from: usize,
+    find_miss: bool,
+    /// A line to scroll the editor to on its next draw.
+    jump: Option<usize>,
 }
 
 impl Editor {
@@ -72,7 +79,29 @@ impl Editor {
             stale: false,
             leaving: None,
             error: None,
+            find: None,
+            find_from: 0,
+            find_miss: false,
+            jump: None,
         })
+    }
+
+    /// Selects the next match of the find bar's text after the last one (wrapping round) and
+    /// moves the focus to the editor, so the match shows selected.
+    fn find_next(&mut self, ctx: &egui::Context) {
+        let Some(q) = self.find.as_deref().filter(|q| !q.is_empty()) else { return };
+        let Some((s, e)) = find_in(&self.text, q, self.find_from) else {
+            self.find_miss = true;
+            return;
+        };
+        self.find_miss = false;
+        self.find_from = e;
+        self.jump = Some(self.text.chars().take(s).filter(|c| *c == '\n').count());
+        let id = editor_id(&self.path);
+        let mut st = TextEdit::load_state(ctx, id).unwrap_or_default();
+        st.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(s), egui::text::CCursor::new(e))));
+        st.store(ctx, id);
+        ctx.memory_mut(|m| m.request_focus(id));
     }
 
     fn dirty(&self) -> bool {
@@ -216,6 +245,26 @@ impl FilesPanel {
     }
 }
 
+const FIND_ID: &str = "files-find";
+
+fn editor_id(path: &Path) -> Id {
+    Id::NULL.with(("files-text", path))
+}
+
+/// The first match of `q` in `text` at or after char `from`, else from the start, ignoring
+/// case; as char indices (start, end).
+fn find_in(text: &str, q: &str, from: usize) -> Option<(usize, usize)> {
+    // One char to one char, so indices stay those of `text`.
+    let low = |s: &str| s.chars().map(|c| c.to_lowercase().next().unwrap_or(c)).collect::<Vec<_>>();
+    let (hay, needle) = (low(text), low(q));
+    if needle.is_empty() || needle.len() > hay.len() {
+        return None;
+    }
+    let at = |i: usize| hay[i..].starts_with(&needle);
+    let last = hay.len() - needle.len();
+    (from.min(last + 1)..=last).chain(0..from.min(last + 1)).find(|&i| at(i)).map(|i| (i, i + needle.len()))
+}
+
 /// `path` below `root` (the same folder counts, as an empty path), matched as the platform
 /// does (any case on Windows); None outside it.
 fn relative(root: &Path, path: &Path) -> Option<PathBuf> {
@@ -354,6 +403,27 @@ pub fn show(ui: &mut Ui, rect: Rect, body: Rect, f: &mut FilesPanel, share: &mut
             if shown {
                 content.min.y = strip.bottom();
             }
+            // Ctrl+F opens the find bar, F3 finds the next; only while the editor or the bar has
+            // the keys (in the terminal they are the agent's).
+            let find_id = Id::NULL.with(FIND_ID);
+            let focus = ui.memory(|m| m.focused());
+            if focus == Some(editor_id(&e.path)) || focus == Some(find_id) {
+                if ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::F)) {
+                    e.find.get_or_insert_default();
+                    ui.memory_mut(|m| m.request_focus(find_id));
+                }
+                if e.find.is_some() && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::F3)) {
+                    e.find_next(ui.ctx());
+                }
+            }
+            if e.find.is_some() {
+                let bar = Rect::from_min_size(content.min, Vec2::new(content.width(), 32.0));
+                if find_bar(ui, bar, e, find_id) {
+                    e.find = None;
+                    ui.memory_mut(|m| m.request_focus(editor_id(&e.path)));
+                }
+                content.min.y = bar.bottom();
+            }
             editor(ui, content, e);
         }
     }
@@ -399,10 +469,45 @@ fn strip_row(ui: &mut Ui, r: Rect, text: &str, buttons: &[&str]) -> Option<usize
     clicked
 }
 
+/// The find bar: the text, Next, ✕. Enter or Next selects the next match in the editor; true
+/// when it is closed (✕ or Esc).
+fn find_bar(ui: &mut Ui, r: Rect, e: &mut Editor, id: Id) -> bool {
+    ui.painter().rect_filled(r, 0, RAISED_BG);
+    ui.painter().hline(r.x_range(), r.bottom() - 0.5, Stroke::new(1.0, HAIRLINE));
+    let (mut next, mut close) = (false, false);
+    ui.scope_builder(UiBuilder::new().max_rect(r.shrink2(Vec2::new(10.0, 5.0))).layout(egui::Layout::right_to_left(egui::Align::Center)), |ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        close = bar_button(ui, "✕", false).on_hover_text("Close (Esc)").clicked();
+        next = bar_button(ui, "Next", true).on_hover_text("Enter or F3").clicked();
+        if e.find_miss {
+            ui.label(egui::RichText::new("No match").font(ui_font(12.0)).color(TEXT_MUTED));
+        }
+        let q = e.find.get_or_insert_default();
+        let out = TextEdit::singleline(q).id(id).hint_text("Find").font(ui_font(12.0)).desired_width(ui.available_width()).show(ui);
+        if out.response.changed() {
+            e.find_miss = false;
+        }
+        if out.response.lost_focus() {
+            next |= ui.input(|i| i.key_pressed(Key::Enter));
+            close |= ui.input(|i| i.key_pressed(Key::Escape));
+        }
+    });
+    if next {
+        e.find_next(ui.ctx());
+    }
+    close
+}
+
 /// The plain editor: line numbers, monospace, no wrapping (so the numbers stay on their lines).
 fn editor(ui: &mut Ui, r: Rect, e: &mut Editor) {
     ui.scope_builder(UiBuilder::new().max_rect(r.shrink2(Vec2::new(6.0, 4.0))), |ui| {
-        egui::ScrollArea::both().id_salt(("files-editor", &e.path)).auto_shrink(false).show(ui, |ui| {
+        let mut area = egui::ScrollArea::both().id_salt(("files-editor", &e.path)).auto_shrink(false);
+        // A find shows its line a few lines down from the top.
+        if let Some(line) = e.jump.take() {
+            let row = ui.fonts_mut(|f| f.row_height(&mono(13.0)));
+            area = area.vertical_scroll_offset(line.saturating_sub(3) as f32 * row);
+        }
+        area.show(ui, |ui| {
             ui.horizontal_top(|ui| {
                 let lines = e.text.split('\n').count();
                 let numbers: String = (1..=lines).map(|n| format!("{n}\n")).collect();
@@ -410,7 +515,7 @@ fn editor(ui: &mut Ui, r: Rect, e: &mut Editor) {
                 ui.add_space(6.0);
                 ui.add(
                     TextEdit::multiline(&mut e.text)
-                        .id_salt(("files-text", &e.path))
+                        .id(editor_id(&e.path))
                         .font(mono(13.0))
                         .text_color(TEXT_PRIMARY)
                         .frame(egui::Frame::NONE)
@@ -427,24 +532,36 @@ fn editor(ui: &mut Ui, r: Rect, e: &mut Editor) {
 /// The folder tree, or the files matching the filter.
 fn tree(ui: &mut Ui, r: Rect, f: &mut FilesPanel) {
     let search = Rect::from_min_size(r.min + Vec2::new(10.0, 8.0), Vec2::new(r.width() - 20.0, 26.0));
-    ui.scope_builder(UiBuilder::new().max_rect(search), |ui| {
-        TextEdit::singleline(&mut f.filter)
+    let entered = ui.scope_builder(UiBuilder::new().max_rect(search), |ui| {
+        let out = TextEdit::singleline(&mut f.filter)
             .id(Id::NULL.with("files-filter"))
-            .hint_text("Filter files")
+            .hint_text("Filter, or paste a full path and press Enter")
             .font(ui_font(12.0))
             .desired_width(search.width())
             .show(ui);
+        out.response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter))
     });
+    // A full path (Explorer's "Copy as path" quotes it): shown on Enter, not searched for.
+    let typed = f.filter.trim().trim_matches('"').to_string();
+    let as_path = Path::new(&typed).is_absolute().then(|| PathBuf::from(&typed));
+    if let Some(p) = as_path.as_ref().filter(|p| entered.inner && p.exists()) {
+        f.reveal(ui.ctx(), p);
+        return;
+    }
     let list = Rect::from_min_max(Pos2::new(r.left(), search.bottom() + 6.0), r.max);
     let mut clicked: Option<Entry> = None;
-    let query = f.filter.trim().to_string();
+    let query = if as_path.is_some() { String::new() } else { f.filter.trim().to_string() };
     if !query.is_empty() && f.found.as_ref().map(|(q, _)| q) != Some(&query) {
         f.found = Some((query.clone(), files::find(&f.root, &query, FOUND_MAX)));
     }
     ui.scope_builder(UiBuilder::new().max_rect(list), |ui| {
         egui::ScrollArea::vertical().id_salt("files-tree").auto_shrink(false).show(ui, |ui| {
             ui.spacing_mut().item_spacing = Vec2::ZERO;
-            if query.is_empty() {
+            if let Some(p) = &as_path {
+                ui.add_space(12.0);
+                let note = if p.exists() { "  Press Enter to open it." } else { "  No such file or folder." };
+                ui.label(egui::RichText::new(note).color(TEXT_MUTED));
+            } else if query.is_empty() {
                 let mut rows = Vec::new();
                 flatten(f, &f.root.clone(), 0, &mut rows);
                 let target = f.scroll_to.take();
@@ -550,6 +667,18 @@ mod tests {
         touch_later(&p, 10);
         e.watch(20.0);
         assert!(e.stale && e.text.ends_with("C=4\n"));
+    }
+
+    #[test]
+    fn find_goes_on_from_the_last_match_and_wraps() {
+        let t = "KEY=1\nkey=2\nĐường=3";
+        assert_eq!(find_in(t, "key", 0), Some((0, 3)));
+        assert_eq!(find_in(t, "key", 3), Some((6, 9)), "the next one, ignoring case");
+        assert_eq!(find_in(t, "key", 9), Some((0, 3)), "wraps to the start");
+        assert_eq!(find_in(t, "đường", 0), Some((12, 17)), "char indices, not bytes");
+        assert_eq!(find_in(t, "nope", 0), None);
+        assert_eq!(find_in(t, "", 0), None);
+        assert_eq!(find_in("ab", "abc", 0), None);
     }
 
     #[test]
