@@ -32,6 +32,8 @@ const BLINK: Duration = Duration::from_millis(600);
 /// so an idle pane asks for no repaints at all (PORTING.md D14).
 const BLINK_IDLE: Duration = Duration::from_secs(5);
 const MULTI_CLICK: Duration = Duration::from_millis(400);
+/// After a copy on release, Ctrl+C this long copies (nothing) instead of interrupting.
+const COPY_GRACE: Duration = Duration::from_secs(2);
 
 /// Per-pane widget state kept by the app between frames.
 #[derive(Default)]
@@ -55,6 +57,9 @@ pub struct ViewState {
     /// The last candidate looked up and what it resolved to, so a held pointer does not ask
     /// the disk every frame.
     path_cache: Option<(String, Option<std::path::PathBuf>)>,
+    /// When a selection was last copied on release: a Ctrl+C just after it copies nothing new
+    /// and must not interrupt the agent, even if the agent's redraw has cleared the selection.
+    copied_at: Option<Instant>,
 }
 
 /// What happened this frame that the pane must act on.
@@ -286,8 +291,19 @@ fn handle_pointer(
                     state.mouse_button = pressed.then_some(b);
                     continue;
                 }
+                // Right-click copies the selection, or pastes when there is none (Windows Terminal).
+                if b == MouseButton::Right && *pressed && rect.contains(*pos) {
+                    match term.selection_text() {
+                        Some(text) => {
+                            out.copy = Some(text);
+                            term.clear_selection();
+                        }
+                        None => out.paste_requested = true,
+                    }
+                    continue;
+                }
                 if b != MouseButton::Left {
-                    continue; // no context menu, no right-click paste (C# had none)
+                    continue;
                 }
                 if *pressed {
                     if let Some(link) = link_at(term, pt) {
@@ -324,6 +340,12 @@ fn handle_pointer(
                         t.selection = None;
                     }
                     drop(t);
+                    // Copied on release: an agent redrawing its screen can clear the selection
+                    // before Ctrl+C is pressed.
+                    if let Some(text) = term.selection_text().filter(|t| !t.is_empty()) {
+                        out.copy = Some(text);
+                        state.copied_at = Some(Instant::now());
+                    }
                     term.touch();
                 }
             }
@@ -374,6 +396,22 @@ fn handle_pointer(
                 }
             }
             _ => {}
+        }
+    }
+    // A selection dragged past the top or bottom scrolls the history, a line a tick while held.
+    if state.selecting && !report {
+        if let Some(pos) = ui.input(|i| i.pointer.latest_pos()) {
+            let step = if pos.y < rect.top() { 1 } else if pos.y > rect.bottom() { -1 } else { 0 };
+            if step != 0 {
+                term.scroll(Scroll::Delta(step));
+                let offset = term.lock().grid().display_offset();
+                let (pt, side) = point_at(pos, origin, cell, size, offset);
+                if let Some(s) = term.lock().selection.as_mut() {
+                    s.update(pt, side);
+                }
+                term.touch();
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(30));
+            }
         }
     }
     if hovered {
@@ -455,6 +493,8 @@ fn handle_keys(ui: &Ui, term: &Terminal, state: &mut ViewState, mode: TermMode, 
                         out.copy = Some(text);
                         term.clear_selection();
                     }
+                    // Just copied on release: the text is on the clipboard already.
+                    None if state.copied_at.is_some_and(|t| t.elapsed() < COPY_GRACE) => {}
                     None => {
                         out.input.push(vec![0x03]);
                         typed = true;

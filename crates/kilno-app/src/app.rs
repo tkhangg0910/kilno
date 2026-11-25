@@ -2294,6 +2294,30 @@ fn quiet_button_wide(ui: &mut Ui, text: &str, w: f32) -> egui::Response {
 }
 
 impl eframe::App for KilnoApp {
+    /// egui's own clipboard keys are off (the terminal takes Ctrl+C and Ctrl+V itself), so a
+    /// focused text field (the Files editor, search, rename) gets them back here.
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        let Some(focused) = ctx.memory(|m| m.focused()) else { return };
+        if egui::TextEdit::load_state(ctx, focused).is_none() {
+            return;
+        }
+        for ev in &mut raw.events {
+            let egui::Event::Key { key, pressed: true, modifiers, .. } = ev else { continue };
+            if !modifiers.command || modifiers.alt {
+                continue;
+            }
+            *ev = match key {
+                Key::C => egui::Event::Copy,
+                Key::X => egui::Event::Cut,
+                Key::V => match os::read_clipboard() {
+                    os::Clip::Text(t) => egui::Event::Paste(t),
+                    _ => continue,
+                },
+                _ => continue,
+            };
+        }
+    }
+
     /// Runs while hidden too: pane events, the reveal request, and close-only-hides.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.handle_events(ctx);
