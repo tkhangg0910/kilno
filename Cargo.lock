@@ -1989,7 +1989,7 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
 name = "kilno-app"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "arboard",
  "chrono",
@@ -2016,7 +2016,7 @@ dependencies = [
 
 [[package]]
 name = "kilno-core"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "chrono",
  "notify",
@@ -2032,7 +2032,7 @@ dependencies = [
 
 [[package]]
 name = "kilno-island"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "ab_glyph",
  "chrono",
@@ -2046,7 +2046,7 @@ dependencies = [
 
 [[package]]
 name = "kilno-pty"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "libc",
  "portable-pty",
@@ -2055,7 +2055,7 @@ dependencies = [
 
 [[package]]
 name = "kilno-term"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "alacritty_terminal",
  "egui",
