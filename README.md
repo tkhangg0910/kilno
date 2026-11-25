@@ -31,7 +31,7 @@ the top of the screen that tells you when a session asks for a permission or a d
 | <img src="docs/assets/picker.png" width="420" alt="The island offering a new screenshot to a session"> | **Screenshots straight to the prompt.** Take a screenshot with Ctrl+Alt+S or any tool, and the island hands it to the session you pick. |
 
 Kilno is one small native `kilno.exe`. It reads your agents' local session files and sends nothing
-out; its only network call is the update check. It is an early release (v0.2.6), forked from
+out; its only network call is the update check. It is an early release (v0.2.7), forked from
 the Rust port of [Clayo](https://github.com/YogiOnCode/Clayo) (see [Credits](#credits)).
 
 ## Lighter than Clayo
